@@ -405,3 +405,69 @@ mu <- link(m4.6,data = unknown_weights )
 
 #looks like I computed striaght from the MAP and not the distribution, i'm not entirally sure
 #how those two things are different at the moment
+
+
+
+
+## 4H2
+
+library(rethinking)
+
+data("Howell1")
+d <- Howell1
+
+#only get childrens data
+d.kids <- d[d$age <= 18,]
+
+
+# Fit a linear regression to these data, using quap.
+
+median(d$height)
+summary(d$height)
+
+d.kids$weight
+m.kids <- quap(
+  alist(
+    height ~ dnorm( mu , sigma ) ,
+    mu <- a + b*( weight - mean(weight) ) ,
+    a ~ dnorm( 111 , 20 ) ,
+    b ~ dlnorm( 1 ) ,
+    sigma ~ dexp(1)
+  ) , data=d.kids )
+
+
+# extract 20 samples from the posterior
+post <- extract.samples( m.kids , n=20 )
+# display raw data and sample size
+plot( d.kids$weight , d.kids$height ,
+      xlim=range(d.kids$weight) , ylim=range(d.kids$height) ,
+      col=rangi2 , xlab="weight" , ylab="height" )
+#mtext(concat("N = ",N))
+# plot the lines, with transparency
+for ( i in 1:20 )
+  curve( post$a[i] + post$b[i]*(x-mean(d.kids$weight)) ,
+         col=col.alpha("black",0.3) , add=TRUE )
+
+
+precis(post)
+
+#for every 10 units of weight a child with get 20cm taller
+
+
+
+##$$ 4H3
+# Model the relationship between height (cm) and 
+#the natural logarithm of weight (log-kg).
+library(rethinking)
+data(Howell1)
+d <- Howell1
+logxbar <- mean( log(d$weight) )
+mlw <- quap(
+  alist(
+    height ~ dnorm( mean=mu , sd=sigma ) ,
+    mu <- a + b*( log(weight) - logxbar ) ,
+    a ~ dnorm( 178 , 20 ) ,
+    b ~ dnorm( 0 , 10 ) ,
+    sigma ~ dunif( 0 , 50 )
+  ) , data=d )
+precis(mlw)
