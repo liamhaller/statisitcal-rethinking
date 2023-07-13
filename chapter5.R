@@ -291,4 +291,262 @@ prior %>%
     theme(panel.grid = element_blank(),
           strip.background = element_rect(fill = "transparent", color = "transparent")) +
     facet_wrap(~ parameter, ncol = 1, labeller = label_parsed)
-    
+  
+  
+
+# Categorical variables ---------------------------------------------------
+
+
+  data(Howell1)
+  d <- Howell1
+  d$sex <- ifelse( d$male==1 , 2 , 1 )
+  
+  d <-
+    d %>% 
+    mutate(sex = factor(sex))
+  
+  b5.8 <- 
+    brm(data = d, 
+        family = gaussian,
+        height ~ 0 + sex,
+        prior = c(prior(normal(178, 20), class = b),
+                  prior(uniform(0, 50), class = sigma, ub = 50)),
+        iter = 2000, warmup = 1000, chains = 4, cores = 4,
+        seed = 5,
+        file = "fits/b05.08")
+  
+  
+  print(b5.8)
+  
+  #how to get typical model output when requesting two different intercepts
+  library(tidybayes)
+  
+  as_draws_df(b5.8) %>% 
+    mutate(diff_fm = b_sex1 - b_sex2) %>% 
+    pivot_longer(cols = c(b_sex1:sigma, diff_fm)) %>% 
+    group_by(name) %>% 
+    mean_qi(value, .width = .89)
+  
+  
+  #now many categories 
+  data(milk)
+  d <- milk
+  class(d$clade)
+  
+  #standardize nutritional density 
+  d <-
+    d %>% 
+    mutate(kcal.per.g_s = (kcal.per.g - mean(kcal.per.g)) / sd(kcal.per.g))
+  
+  
+  b5.9 <- 
+    brm(data = d, 
+        family = gaussian,
+        kcal.per.g_s ~ 0 + clade,
+        prior = c(prior(normal(0, 0.5), class = b),
+                  prior(exponential(1), class = sigma)),
+        iter = 2000, warmup = 1000, chains = 4, cores = 4,
+        seed = 5,
+        file = "fits/b05.09")
+  
+  
+  
+  mcmc_plot(b5.9, variable = "^b_", regex = TRUE)
+sessionInfo()  
+
+
+
+
+
+# Questions ---------------------------------------------------------------
+
+data(WaffleDivorce)
+d <- WaffleDivorce
+
+lds <- read.csv('/Users/haller/Desktop/lds-data-2021.csv')
+colnames(lds) <- c('Location', 'members', 'population')
+
+#standardize percet lds
+lds <- lds %>% 
+  mutate(pct_lds = members/population) %>% 
+  mutate(lds = rethinking::standardize(pct_lds)) %>% 
+  select(Location, lds)
+
+
+#join lds with waffle data
+d <- inner_join(d, lds, by = 'Location')
+
+#standardize divorce, marriage, and median age
+d <-
+  d %>% 
+  mutate(d = rethinking::standardize(Divorce),
+         m = rethinking::standardize(Marriage),
+         a = rethinking::standardize(MedianAgeMarriage))
+
+
+sd(d$lds)
+
+bM4.5 <- 
+  brm(data = d, 
+      family = gaussian,
+      d ~ 1 + m + a + lds,
+      prior = c(prior(normal(0, 0.2), class = Intercept),
+                prior(normal(0, 0.5), class = b),
+                prior(exponential(1), class = sigma)),
+      iter = 2000, warmup = 1000, chains = 4, cores = 4,
+      seed = 5,
+      file = "fits/bM4.5")
+
+
+bM4.5a_nolds <- 
+  update(bM4.5,
+         newdata = d, 
+         formula = d ~ 1 + m + a,
+         seed = 5,
+         file = "fits/bM4.5_nolds")
+
+
+
+
+#Coef plot of function
+mcmc_plot(bM4.5, variable = "^b_", regex = TRUE)
+
+
+
+#lets look at coef plot with and without lds as a predictor variable
+# first, extract and rename the necessary posterior parameters
+bind_cols(
+  as_draws_df(bM4.5) %>% 
+    transmute(`bM4.5_beta[A]` = b_a,
+              `bM4.5_beta[M]` = b_m,
+              `bM4.5_beta[lds]` = b_lds),
+  as_draws_df(bM4.5a_nolds) %>% 
+    transmute(`bM4.5a_beta[A]` = b_a,
+              `bM4.5a_beta[M]` = b_m)
+)  %>% 
+  # convert them to the long format, group, and get the posterior summaries
+  pivot_longer(everything()) %>% 
+  group_by(name) %>% 
+  summarise(mean = mean(value),
+            ll   = quantile(value, prob = .025),
+            ul   = quantile(value, prob = .975)) %>% 
+  # since the `key` variable is really two variables in one, here we split them up
+  separate(col = name, into = c("fit", "parameter"), sep = "_") %>% 
+  
+  # plot!
+  ggplot(aes(x = mean, xmin = ll, xmax = ul, y = fit)) +
+  geom_vline(xintercept = 0, color = "firebrick", alpha = 1/5) +
+  geom_pointrange(color = "firebrick") +
+  labs(x = "posterior", y = NULL) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_rect(fill = "transparent", color = "transparent")) +
+  facet_wrap(~ parameter, ncol = 1, labeller = label_parsed)
+
+##answer
+library(tidybayes)
+spread_draws(bM4.5, `b_.*`, regex = TRUE) %>% 
+  pivot_longer(starts_with("b_"), names_to = "parameter",
+               values_to = "value") %>% 
+  ggplot(aes(x = value, y = parameter)) +
+  stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+  labs(x = "Parameter Value", y = "Parameter")
+
+
+## let's try this again but now looking at the log of lds
+data(WaffleDivorce)
+d <- WaffleDivorce
+
+lds <- read.csv('/Users/haller/Desktop/lds-data-2021.csv')
+
+lds <- lds %>%   mutate(lds_prop = members / population,
+         lds_per_capita = lds_prop * 100000)
+
+
+
+lds_divorce <- WaffleDivorce %>%
+  as_tibble() %>%
+  select(Location, Divorce, Marriage, MedianAgeMarriage) %>%
+  left_join(select(lds, state, lds_per_capita),
+            by = c("Location" = "state")) %>%
+  mutate(lds_per_capita = log(lds_per_capita)) %>%
+  mutate(across(where(is.numeric), standardize)) %>% 
+  filter(!is.na(lds_per_capita)) %>% 
+  rename(d = Divorce, m = Marriage, a = MedianAgeMarriage, log.lds = lds_per_capita)
+
+
+l.lds <- brm(d ~ 1 + m + a + log.lds,
+               data = lds_divorce, family = gaussian,
+               prior = c(prior(normal(0, 0.2), class = Intercept),
+                         prior(normal(0, 0.5), class = b),
+                         prior(exponential(1), class = sigma)),
+               iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+               file =  "fits/l.lds")
+
+l.ldsa <- 
+  update(l.lds,
+         newdata = lds_divorce, 
+         formula = d ~ 1 + m + a,
+         seed = 1234,
+         file = "fits/l.ldsa")
+
+
+
+
+#Coef plot of function
+mcmc_plot(l.lds, variable = "^b_", regex = TRUE)
+
+mcmc_plot(l.ldsa, variable = "^b_", regex = TRUE)
+
+
+#lets look at coef plot with and without lds as a predictor variable
+# first, extract and rename the necessary posterior parameters
+bind_cols(
+  as_draws_df(l.lds) %>% 
+    transmute(`l.lds_beta[A]` = b_a,
+              `l.lds_beta[M]` = b_m,
+              `l.lds_beta[lds]` = b_log.lds),
+  as_draws_df(l.ldsa) %>% 
+    transmute(`l.ldsa_beta[A]` = b_a,
+              `l.ldsa_beta[M]` = b_m)
+)  %>% 
+  # convert them to the long format, group, and get the posterior summaries
+  pivot_longer(everything()) %>% 
+  group_by(name) %>% 
+  summarise(mean = mean(value),
+            ll   = quantile(value, prob = .025),
+            ul   = quantile(value, prob = .975)) %>% 
+  # since the `key` variable is really two variables in one, here we split them up
+  separate(col = name, into = c("fit", "parameter"), sep = "_") %>% 
+  
+  # plot!
+  ggplot(aes(x = mean, xmin = ll, xmax = ul, y = fit)) +
+  geom_vline(xintercept = 0, color = "firebrick", alpha = 1/5) +
+  geom_pointrange(color = "firebrick") +
+  labs(x = "posterior", y = NULL) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        strip.background = element_rect(fill = "transparent", color = "transparent")) +
+  facet_wrap(~ parameter, ncol = 1, labeller = label_parsed)
+
+##answer
+library(tidybayes)
+spread_draws(l.lds, `b_.*`, regex = TRUE) %>% 
+  pivot_longer(starts_with("b_"), names_to = "parameter",
+               values_to = "value") %>% 
+  ggplot(aes(x = value, y = parameter)) +
+  stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+  labs(x = "Parameter Value", y = "Parameter")
+
+
+
+
+
+#not a huge difference! turns out i read the graph wrong before since the 
+#variabels were in a different order, but that's a dub.
+
+
+
+
+
+     
