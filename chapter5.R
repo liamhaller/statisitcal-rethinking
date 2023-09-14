@@ -547,6 +547,268 @@ spread_draws(l.lds, `b_.*`, regex = TRUE) %>%
 
 
 
+###### 5H1 ##########
+library(dagitty)
 
 
-     
+
+dag.5h1 <- dagitty('dag{ M -> A -> D }')
+impliedConditionalIndependencies( dag.5h1 )
+equivalentDAGs(dag.5h1)
+
+####### 5H2 ########
+#create a counterfactual plot assuming the real relationship is M → A → D
+#of cutting the mariage rate in half
+
+
+data(WaffleDivorce)
+d <- WaffleDivorce
+
+#standardize our variables
+d <-
+  d %>% 
+  mutate(d = rethinking::standardize(Divorce),
+         m = rethinking::standardize(Marriage),
+         a = rethinking::standardize(MedianAgeMarriage))
+
+a_model <- bf(a ~ 1 + m)
+d_model <- bf(d ~ 1 + a + m)
+
+H51 <- brm(data = d,
+           family = gaussian,
+           d_model + a_model + set_rescor(FALSE),
+           prior = c(prior(normal(0, 0.2), class = Intercept, resp = d),
+                     prior(normal(0, 0.5), class = b, resp = d),
+                     prior(exponential(1), class = sigma, resp = d),
+                     
+                     prior(normal(0, 0.2), class = Intercept, resp = a),
+                     prior(normal(0, 0.5), class = b, resp = a),
+                     prior(exponential(1), class = sigma, resp = a)),
+                     iter = 2000, warmup = 1000, chains = 4, cores = 4,
+                     seed = 5,
+                     file = "fits/H51")
+          
+
+
+
+m_seq <- tibble(m = seq(from = -4, to = 0, length.out = 30),
+                      a = 0)
+
+p1 <-
+  predict(H51,
+          resp = "d",
+          newdata = m_seq) %>% 
+  data.frame() %>% 
+  bind_cols(m_seq)
+
+
+ggplot(p1, aes(x = m, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  geom_smooth(stat = "identity",
+              fill = "firebrick", color = "firebrick4", alpha = 1/5, linewidth = 1/4) +
+  labs(subtitle = "Total counterfactual effect of M on D",
+       x = "manipulated M",
+       y = "counterfactual D") +
+  coord_cartesian(ylim = c(-2, 2)) +
+  theme_bw() +
+  theme(panel.grid = element_blank()) 
+
+
+#the data shows us that M-->D is small so makes sensce that this souldn' be huge either
+
+               
+
+#now to answer what's the expected causal effect of decreaseing median mariage rate
+
+mean(d$Marriage) # = 20
+sd(d$Marriage)
+
+#ahhhh okay this is how we compute how many sd a half reduction change is
+nd <- tibble(m = (c(20.114, 10) - 20.114) / 3.797905,
+             a = 0)
+
+
+
+p2 <- predict(H51,
+        resp = "d",
+        newdata = nd,
+        summary = F) 
+
+
+
+  p2 %>%
+    data.frame() %>% 
+  set_names("m20", "m10") %>% 
+  mutate(difference = m20 - m10) %>% 
+  summarise(mean = mean(difference))
+
+  
+  
+  
+
+# 5H3 ---------------------------------------------------------------------
+
+ # Return to the milk energy model, m5.7.
+  #Suppose that the true causal relationship among the variables is
+
+  
+  
+  library(dagitty)
+  
+  
+  dag.5h3 <- dagitty('dag{ M -> N ;
+                           M -> K ;
+                           N -> K}')
+  equivalentDAGs(dag.5h3)
+  #Now compute the counterfactual effect on K of doubling M
+  
+  
+  
+  #Load data
+  data(milk, package = "rethinking")
+  d <- milk
+  rm(milk)
+  
+  glimpse(d)
+  
+  
+  #standardize varaibles
+  d <-
+    d %>% 
+    mutate(
+          log_mass = log(mass),
+          K = rethinking::standardize(kcal.per.g),
+           M = rethinking::standardize(log_mass),
+           N = rethinking::standardize(neocortex.perc)) %>% 
+    drop_na(everything()) 
+  
+  #models
+  #(for the counterfactual i'm guessing I model each variable, 
+  #that I won't be changing)
+  K_model <- bf(K ~ 1 + M + N)
+  N_model <- bf(N ~ 1 + M)
+
+  
+  
+  H53.1 <- brm(data = d,
+             family = gaussian,
+             K_model + N_model + set_rescor(FALSE), #no autocorelation between the models
+             prior = c(prior(normal(0, 0.2), class = Intercept, resp = K),
+                       prior(normal(0, 0.5), class = b, resp = K),
+                       prior(exponential(1), class = sigma, resp = K),
+                       
+                       prior(normal(0, 0.2), class = Intercept, resp = N),
+                       prior(normal(0, 0.5), class = b, resp = N),
+                       prior(exponential(1), class = sigma, resp = N)),
+             iter = 2000, warmup = 1000, chains = 4, cores = 4,
+             seed = 5,
+             file = "fits/H53.1")
+print(H53.1)
+
+
+#point perdiction for doubling M(ass)
+mean_M <- mean(d$mass)
+sd_M <- sd(d$mass)
+
+
+nd <- tibble(M = (c(mean_M, mean_M*2) - mean_M) / sd_M,
+             N = 0)
+
+
+p2 <- predict(H53,
+              resp = "K",
+              newdata = nd,
+              summary = F) 
+
+
+
+p2 %>%
+  data.frame() %>% 
+  set_names("M14", "M28") %>% 
+  mutate(difference = M14 - M28) %>% 
+  summarise(mean = mean(difference))
+
+## = .310  (now with log m .36)
+
+#the average difference in K from doubling M is .31 meaning 
+#larger mass means one third of the calores per gram
+
+## in graph form 
+
+
+#let's see sd change from -2 to 2
+M_seq <- tibble(M = seq(from = -2, to = 2, length.out = 30),
+                N = 0)
+
+p1 <-
+  predict(H53,
+          resp = "K", #look at outcome on K var
+          newdata = M_seq) %>% 
+  data.frame() %>% 
+  bind_cols(M_seq)
+
+
+g1 <- ggplot(p1, aes(x = M, y = Estimate, ymin = Q2.5, ymax = Q97.5)) +
+  geom_smooth(stat = "identity",
+              fill = "firebrick", color = "firebrick4", alpha = 1/5, linewidth = 1/4) +
+  labs(subtitle = "Total counterfactual effect of M on K",
+       x = "manipulated M",
+       y = "counterfactual K") +
+  coord_cartesian(ylim = c(-2, 2)) +
+  theme_bw() +
+  theme(panel.grid = element_blank()) 
+g1
+
+
+
+
+### answer key ##
+
+#just the counterfactual plot (or nto)
+
+milk_cf <- as_draws_df(H53.1) %>%
+  as_tibble() %>% 
+  select(.draw, b_K_Intercept:sigma_N) %>% 
+  expand(nesting(.draw, b_K_Intercept, b_N_Intercept, b_K_M, b_K_N, b_N_M,
+                 sigma_K, sigma_N),
+         mass = seq(from = 0.5, to = 80, by = 0.5)) %>% 
+
+
+  mutate(log_mass = log(mass),
+         M = (log_mass - mean(d$log_mass)) / sd(d$log_mass),
+         n_sim = rnorm(n(), mean = b_N_Intercept + b_N_M * M, sd = sigma_N),
+         k_sim = rnorm(n(), mean = b_K_Intercept + b_K_N * n_sim + b_K_M * M,
+                       sd = sigma_K)) %>% 
+
+
+  pivot_longer(ends_with("_sim"), names_to = "name", values_to = "value") %>%
+  group_by(mass, name) %>%
+  mean_qi(value, .width = c(0.89)) %>%
+  ungroup() %>%
+  filter(name == "k_sim") %>%
+  mutate(name = case_when(name == "n_sim" ~ "Counterfactual effect M on N",
+                          TRUE ~ "Total Counterfactual effect of M on K"))
+
+ggplot(milk_cf, aes(x = mass, y = value, ymin = .lower, ymax = .upper)) +
+  geom_smooth(stat = "identity") +
+  labs(x = "Manipulated Mass", y = "Counterfactual K")
+
+
+
+
+
+(log(c(15, 30)) - mean(log(d$mass))) / sd(log(d$mass)) 
+#> [1] 0.6253176 0.9839050
+
+as_draws_df(H53.1) %>% 
+  mutate(n_avg = rnorm(n(), b_N_Intercept + b_N_M * 0.6253176, sigma_N),
+         n_dbl = rnorm(n(), b_N_Intercept + b_N_M * 0.9839050, sigma_N),
+         k_avg = rnorm(n(), b_K_Intercept + b_K_M * 0.6253176 + b_K_N * n_avg,
+                       sigma_K),
+         k_dbl = rnorm(n(), b_K_Intercept + b_K_M * 0.9839050 + b_K_N * n_dbl,
+                       sigma_K),
+         diff = k_dbl - k_avg) %>% 
+  median_hdi(diff, .width = 0.89)
+#> # A tibble: 1 × 6
+#>     diff .lower .upper .width .point .interval
+#>    <dbl>  <dbl>  <dbl>  <dbl> <chr>  <chr>    
+#> 1 -0.151  -2.45   1.82   0.89 median hdi
